@@ -27,6 +27,9 @@ void AddGomoryConstraint(Simplex* simplex, double* gomoryConstraint);
 double* CreateGomoryConstraint(Simplex* simplex, int constraintRowIndex);
 int FindXColumnIndexToAddGomoryConstraint(Simplex* simplex, double* solution);
 double* ExtendBasics(Simplex* simplex, int gomoryPivotCol);
+void DoGomory(Simplex* simplex, double* solution);
+double* PrintSolutionAndGet(double* basics, int basicsLength, double** tableau, int numCols);
+void PrintArray(double* arrayToPrint, int arrayLength);
 
 // Function principal
 int main(int argc, char** argv) {
@@ -70,6 +73,47 @@ int main(int argc, char** argv) {
     return 0;
 }
 
+void DoGomory(Simplex* simplex, double* solution) {
+    //here the Gomory
+    printf("Gomory\n");
+    
+}
+
+double* PrintSolutionAndGet(double* basics, int basicsLength, double** tableau, int numCols) {
+    printf("Solution:\n");
+
+    // Allocate memory for the solution array
+    double* solution = (double*)calloc(basicsLength, sizeof(double));
+    if (solution == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        exit(1);
+    }
+
+    // Populate the solution array
+    for (int i = 0; i < basicsLength; i++) {
+        int xCol = basics[i];
+        if (xCol != -1) {
+            solution[xCol] = tableau[i][numCols - 1];
+        }
+    }
+
+    // Print the solution
+    for (int i = 0; i < basicsLength; i++) {
+        printf("x%d = %f\n", i + 1, solution[i]);
+    }
+
+    return solution;
+}
+
+int ExistNonIntegralSolution(Simplex* simplex) {
+    for (int i = 0; i < simplex->numRows; i++) {
+        if (!IsInteger(simplex->tableau[i][simplex->numCols - 1])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // Initialize the simplex structure
 void InitSimplex(Simplex* simplex, double** tableau, int numRows, int numCols) {
     simplex->numRows = numRows;
@@ -93,6 +137,13 @@ void FreeSimplex(Simplex* simplex) {
     free(simplex->basics);
 }
 
+void PrintArray(double* arrayToPrint, int arrayLength) {
+    printf("Print\n");
+    for (int i = 0; i < arrayLength; i++) {
+        printf("basics[%d] = %d\n", i, arrayToPrint[i]);
+    }
+}
+
 // Solve the linear program
 void Solve(Simplex* simplex) {
     while (1) {
@@ -100,6 +151,12 @@ void Solve(Simplex* simplex) {
         if (pivotCol == -1) {
             printf("Optimal solution found!\n");
             PrintTableau(simplex);
+            /*int basicsLength = sizeof(simplex->basics) / sizeof(simplex->basics[0]);
+            double* solution = PrintSolutionAndGet(simplex->basics, basicsLength, simplex->tableau, simplex->numCols);
+            if (ExistNonIntegralSolution(simplex)) {
+                DoGomory(simplex, solution);
+            }*/
+            
             return;
         }
 
@@ -111,6 +168,9 @@ void Solve(Simplex* simplex) {
 
         Pivot(simplex, pivotRow, pivotCol);
         PrintTableau(simplex);
+        simplex->basics[pivotRow] = pivotCol;
+        int basicsLength = sizeof(simplex->basics) / sizeof(simplex->basics[0]);
+        PrintArray(simplex->basics, basicsLength);
     }
 }
 
