@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdbool.h>
+#include <mpi.h>
 
 // Structure for Simplex Method
 typedef struct {
@@ -136,19 +137,16 @@ void AddGomoryCut(SimplexMethod* simplex, int row, int isFirstTime) {
     int newNumRows = simplex->numRows + 1;
     int newNumCols = simplex->numCols + 1;
 
-    // Realloc rows array to hold one more row
     simplex->tableau = (double**)realloc(simplex->tableau, newNumRows * sizeof(double*));
     if (simplex->tableau == NULL) {
         perror("Failed to reallocate rows");
         exit(EXIT_FAILURE);
     }
 
-    // Shift rows down to make room for the new row at the (numRows - 1) position
     for (int i = newNumRows - 1; i > simplex->numRows - 1; i--) {
         simplex->tableau[i] = simplex->tableau[i - 1];
     }
 
-    // Allocate memory for the new row and initialize it
     simplex->tableau[simplex->numRows - 1] = (double*)malloc(newNumCols * sizeof(double));
     if (simplex->tableau[simplex->numRows - 1] == NULL) {
         perror("Failed to allocate new row");
@@ -162,7 +160,6 @@ void AddGomoryCut(SimplexMethod* simplex, int row, int isFirstTime) {
         simplex->tableau[simplex->numRows - 1][j] = fractionalPart != 0 ? -1 * fractionalPart : fractionalPart;
     }
 
-    // Reallocate all rows to add the new column
     for (int i = 0; i < newNumRows; i++) {
         simplex->tableau[i] = (double*)realloc(simplex->tableau[i], newNumCols * sizeof(double));
         if (simplex->tableau[i] == NULL) {
@@ -171,7 +168,6 @@ void AddGomoryCut(SimplexMethod* simplex, int row, int isFirstTime) {
         }
     }
 
-    // Shift data in each row to make room for the new column at (numCols - 1) position
     for (int i = 0; i < newNumRows; i++) {
         for (int j = newNumCols - 1; j > simplex->numCols - 1; j--) {
             simplex->tableau[i][j] = simplex->tableau[i][j - 1];
@@ -296,28 +292,39 @@ void FreeSimplex(SimplexMethod* simplex) {
     free(simplex);
 }
 
-int main() {
-    int numRows = 3;
-    int numCols = 5;
+int main(int argc, char** argv) {
+    int myrank, nproc, len;
+    char name[MPI_MAX_PROCESSOR_NAME];
 
-    // Example tableau: Maximize z = 7x1 + 9x2
-    double tableauData[3][5] = {
-        { -1, 3, 1, 0, 6 },
-        { 7, 1, 0, 1, 35 },
-        { -7, -9, 0, 0, 0 }
-    };
+    MPI_Init(&argc, &argv);
 
-    double** tableau = (double**)malloc(numRows * sizeof(double*));
-    for (int i = 0; i < numRows; i++) {
-        tableau[i] = (double*)malloc(numCols * sizeof(double));
-        for (int j = 0; j < numCols; j++) {
-            tableau[i][j] = tableauData[i][j];
+    MPI_Comm_size(MPI_COMM_WORLD, &nproc);
+    MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+    MPI_Get_processor_name(name, &len);
+
+    if (myrank == 0) {
+        int numRows = 3;
+        int numCols = 5;
+
+        // Example tableau: Maximize z = 7x1 + 9x2
+        double tableauData[3][5] = {
+            { -1, 3, 1, 0, 6 },
+            { 7, 1, 0, 1, 35 },
+            { -7, -9, 0, 0, 0 }
+        };
+
+        double** tableau = (double**)malloc(numRows * sizeof(double*));
+        for (int i = 0; i < numRows; i++) {
+            tableau[i] = (double*)malloc(numCols * sizeof(double));
+            for (int j = 0; j < numCols; j++) {
+                tableau[i][j] = tableauData[i][j];
+            }
         }
-    }
 
-    SimplexMethod* simplex = CreateSimplexMethod(tableau, numRows, numCols);
-    ApplyGomoryCuts(simplex);
-    FreeSimplex(simplex);
+        SimplexMethod* simplex = CreateSimplexMethod(tableau, numRows, numCols);
+        ApplyGomoryCuts(simplex);
+        FreeSimplex(simplex);
+    }
 
     return 0;
 }
