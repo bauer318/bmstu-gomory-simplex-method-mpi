@@ -6,7 +6,6 @@
 #define MAX_ITER 100
 #define EPSILON 1e-6
 #define MASTER 0
-double* print_solution_and_get(double** tableau, double* basics, int rows, int cols, int need_extends_basic);
 
 void print_matrix(double** matrix, int rows, int cols) {
     for (int i = 0; i < rows; i++) {
@@ -15,6 +14,34 @@ void print_matrix(double** matrix, int rows, int cols) {
         }
         printf("\n");
     }
+}
+
+double* print_solution_and_get(double** tableau, double* basics, int rows, int cols) {
+    printf("Solution:\n");
+
+    int basics_length = rows - 1;
+    double* solution = (double*)calloc(basics_length, sizeof(double));
+    if (solution == NULL) {
+        fprintf(stderr, "Memory allocation failed for solution.\n");
+        return NULL;
+    }
+
+    for (int i = 0; i < basics_length; i++) {
+        int xCol = (int)basics[i];
+
+        if (xCol >= 0 && xCol < cols) {
+            solution[xCol] = tableau[i][cols - 1];
+        }
+        else {
+            fprintf(stderr, "Warning: Invalid column index basics[%d] = %d\n", i, xCol);
+        }
+    }
+
+    for (int i = 0; i < basics_length; i++) {
+        printf("x%d = %.2f\n", i + 1, solution[i]);
+    }
+
+    return solution;
 }
 
 // Allocate memory for a 2D array (matrix)
@@ -34,8 +61,9 @@ void free_matrix(double** matrix, int rows) {
     free(matrix);
 }
 
-int find_pivot_col(double** tableau, int rows, int cols, MPI_Comm comm) {
+int find_pivot_col(double** tableau, int rows, int cols) {
     int rank, size;
+    MPI_Comm comm = MPI_COMM_WORLD;
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
@@ -83,8 +111,9 @@ int exist_real_value(double** tableau, int rows, int cols) {
 }
 
 
-int find_pivot_row(double** tableau, int rows, int cols, int pivot_col, MPI_Comm comm) {
+int find_pivot_row(double** tableau, int rows, int cols, int pivot_col) {
     int rank, size;
+    MPI_Comm comm = MPI_COMM_WORLD;
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
@@ -133,81 +162,6 @@ int find_gomory_row_to_cut(double** tableau, int rows, int cols) {
     }
 
     return row_to_cut;
-}
-
-void add_gomory_cut_m(double*** tableau, int* rows, int* cols, int gomory_row_to_cut, int is_first_time) {
-
-    int new_rows = *rows + 1;
-    int new_cols = *cols + 1;
-    int gomory_column = *cols - 1;
-    int gomory_row = *rows - 1;
-
-    double** new_tableau = (double**)malloc(new_rows * sizeof(double*));
-    for (int i = 0; i < new_rows; i++) {
-        new_tableau[i] = (double*)malloc(new_cols * sizeof(double));
-    }
-
-
-    for (int i = 0; i < *rows - 1; i++) {
-        for (int j = 0; j < *cols; j++) {
-            if (j == gomory_column) {
-                new_tableau[i][j] = 0.0;
-            }
-            else {
-                new_tableau[i][j] = (*tableau)[i][j];
-            }
-
-        }
-    }
-
-    for (int j = 0; j < *cols; j++) {
-        double value = (*tableau)[gomory_row_to_cut][j];
-        double fractionalPart = value - floor(value);
-        if (j == gomory_column) {
-            new_tableau[gomory_row][j] = 1;
-        }
-        else {
-            new_tableau[gomory_row][j] = fractionalPart != 0 ? -1 * fractionalPart : fractionalPart;
-        }
-    }
-
-    for (int j = 0; j < *cols; j++) {
-        double value = (*tableau)[*rows - 1][j];
-        if (j == gomory_column) {
-            new_tableau[*rows][j] = 0.0;
-        }
-        else {
-            if (is_first_time) {
-
-                new_tableau[*rows][j] = value != 0 ? -1 * value : value;
-            }
-            else {
-                new_tableau[*rows][j] = value;
-            }
-        }
-    }
-
-    for (int i = 0; i < new_rows; i++) {
-        if (i == gomory_row) {
-            double value = (*tableau)[gomory_row_to_cut][gomory_column];
-            double fractionalPart = value - floor(value);
-            new_tableau[i][*cols] = fractionalPart != 0 ? -1 * fractionalPart : fractionalPart;
-        }
-        else {
-            if (i == new_rows - 1 && is_first_time) {
-                new_tableau[i][*cols] = -1 * (*tableau)[gomory_row][gomory_column];
-            }
-            else {
-                new_tableau[i][*cols] = (*tableau)[i][gomory_column];
-            }
-
-        }
-    }
-
-    *tableau = new_tableau;
-    *rows = new_rows;
-    *cols = new_cols;
-
 }
 
 int find_gomory_column_to_add(double** tableau, int rows, int cols) {
@@ -259,62 +213,140 @@ void pivot(double** tableau, int rows, int cols, int pivot_row, int pivot_col) {
         }
     }
 }
+double** add_gomory_cut(double** tableau, int old_rows, int old_cols, int row_to_cut, int is_first_time) {
+    
+    int new_rows = old_rows + 1;
+    int new_cols = old_cols + 1;
+    int gomory_row = old_rows - 1;
+    int gomory_col = old_cols - 1;
 
+    double** result = allocate_matrix(new_rows, new_cols);
+
+	for (int i = 0; i < gomory_row; i++) {
+		for (int j = 0; j < old_cols; j++) {
+            if (j == gomory_col) {
+                result[i][j] = 0.0;
+            }
+            else {
+                result[i][j] = tableau[i][j];
+            }
+           
+		}
+	}
+
+    for (int j = 0; j < old_cols; j++) {
+        double value = tableau[row_to_cut][j];
+        double fractionalPart = value - floor(value);
+        if (j == gomory_col) {
+            result[gomory_row][j] = 1;
+        }
+        else {
+            result[gomory_row][j] = fractionalPart != 0 ? -1 * fractionalPart : fractionalPart;
+        }
+    }
+
+
+    for (int j = 0; j <old_cols; j++) {
+        double value = tableau[gomory_row][j];
+        if (j == gomory_col) {
+            result[old_rows][j] = 0.0;
+        }
+        else {
+            if (is_first_time) {
+
+                result[old_rows][j] = value != 0 ? -1 * value : value;
+            }
+            else {
+                result[old_rows][j] = value;
+            }
+        }
+    }
+
+    //The last column of the extended tableau
+    for (int i = 0; i < new_rows; i++) {
+        if (i == gomory_row) {
+            double value = tableau[row_to_cut][gomory_col];
+            double fractionalPart = value - floor(value);
+            result[i][old_cols] = fractionalPart != 0 ? -1 * fractionalPart : fractionalPart;
+        }
+        else {
+            if (i < old_rows) {
+                result[i][old_cols] = tableau[i][gomory_col];
+            }
+            else {
+                result[i][old_cols] = is_first_time ? -1 * tableau[old_rows - 1][gomory_col] : tableau[old_rows - 1][gomory_col];
+            }
+        }
+        
+    }
+
+    return result;
+
+}
 void apply_gomory_cuts(double** tableau, int rows, int cols, double* basics) {
-
-    int keep_go = exist_real_value(tableau, rows, cols);
+    int keep_apply_gomory_cut = exist_real_value(tableau, rows, cols);
     int is_first_time = 1;
-    int index = 0;
 
-    while (keep_go) {
+    if (keep_apply_gomory_cut) {
+        printf("\nApply Gomory\n");
+    }
+   
+    while (keep_apply_gomory_cut) {
         int row_to_cut = find_gomory_row_to_cut(tableau, rows, cols);
         if (row_to_cut == -1) {
             printf("All solutions are integers.\n");
             break;
         }
         printf("Adding Gomory cut for row %d\n", row_to_cut);
-        //add_gomory_cut_m(&tableau, &rows, &cols, row_to_cut, is_first_time);
-
+        tableau = add_gomory_cut(tableau, rows, cols,row_to_cut, is_first_time);
+        rows++;
+        cols++;
         print_matrix(tableau, rows, cols);
-        printf("-------------------------------------------------------------------\n");
+      
         int gomory_row = rows - 2;
         int gomory_col = find_gomory_column_to_add(tableau, rows, cols);
 
         basics = extend_basics(basics, rows - 2, gomory_col);
 
         pivot(tableau, rows, cols, gomory_row, gomory_col);
-        print_matrix(tableau, rows, cols);
-
-        //double* solution = print_solution_and_get(tableau, basics, rows, cols, 1);
-        keep_go = index <= 2;
-        index++;
+       
+        double* solution = print_solution_and_get(tableau, basics, rows, cols);
+        printf("-------------------------------------------------------------------\n");
+        keep_apply_gomory_cut = exist_real_value(tableau, rows, cols);
         is_first_time = 0;
-
-
     }
+    print_matrix(tableau, rows, cols);
+    printf("-------------------------------------------------------------------\n");
 }
 
 
 // Perform Simplex method on the tableau
-int simplex_method(double** tableau, int rows, int cols, MPI_Comm comm) {
+int simplex_method(double** tableau, int rows, int cols) {
     double* basics = (double*)malloc((rows - 1) * sizeof(double));
     int rank;
+    MPI_Comm comm = MPI_COMM_WORLD;
     MPI_Comm_rank(comm, &rank);
+  
+    int basic_was_initialized = 0;
     while (1) {
         // Check for optimality
-        int pivot_col = find_pivot_col(tableau, rows, cols, comm);
+        int pivot_col = find_pivot_col(tableau, rows, cols);
         if (pivot_col == -1) {
             // Optimal solution found
+            double* solution = NULL;
             if (rank == MASTER) {
-                double* solution = print_solution_and_get(tableau, basics, rows, cols, 0);
+                printf("Optimal solution found\n");
+                print_matrix(tableau, rows, cols);
+                solution = print_solution_and_get(tableau, basics, rows, cols);
                 apply_gomory_cuts(tableau, rows, cols, basics);
+                basic_was_initialized = 1;
             }
-
+            
             return 1;
         }
 
         // Find pivot row
-        int pivot_row = find_pivot_row(tableau, rows, cols, pivot_col, comm);
+        int pivot_row = find_pivot_row(tableau, rows, cols, pivot_col);
         double min_ratio = INFINITY;
 
         if (pivot_row == -1) {
@@ -329,32 +361,6 @@ int simplex_method(double** tableau, int rows, int cols, MPI_Comm comm) {
     }
 }
 
-double* print_solution_and_get(double** tableau, double* basics, int rows, int cols, int need_extends_basic) {
-    printf("Solution:\n");
-
-    int basicsLength = need_extends_basic ? rows + 1 : rows - 1;
-    double* solution = (double*)calloc(basicsLength, sizeof(double));
-    if (solution == NULL) {
-        fprintf(stderr, "Memory allocation failed for solution.\n");
-        return NULL;
-    }
-
-    for (int i = 0; i < basicsLength; i++) {
-        int xCol = (int)basics[i];
-        if (xCol >= 0 && xCol < cols) {
-            solution[xCol] = tableau[i][cols - 1];
-        }
-        else {
-            fprintf(stderr, "Warning: Invalid column index basics[%d] = %d\n", i, xCol);
-        }
-    }
-
-    for (int i = 0; i < basicsLength; i++) {
-        printf("x%d = %.2f\n", i + 1, solution[i]);
-    }
-
-    return solution;
-}
 
 int main(int argc, char* argv[]) {
     int rank, size;
@@ -417,11 +423,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Perform Simplex
-    int optimal = simplex_method(tableau, rows, cols, MPI_COMM_WORLD);
-
-    if (optimal == 1 && rank == MASTER) {
-        print_matrix(tableau, rows, cols);
-    }
+    int optimal = simplex_method(tableau, rows, cols);
 
     free_matrix(tableau, rows);
     free(flat_tableau);
