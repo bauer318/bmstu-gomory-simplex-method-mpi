@@ -6,18 +6,23 @@
 #define MAX_ITER 100
 #define EPSILON 1e-6
 #define MASTER 0
+#define FILE_NAME "result.txt"
 
-void print_matrix(double** matrix, int rows, int cols) {
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            printf("%6.3f ", matrix[i][j]);
+void print_matrix(double** matrix, int rows, int cols, FILE* file) {
+    int i, j;
+    for (i = 0; i < rows; i++) {
+        for (j = 0; j < cols; j++) {
+            fprintf(file, "%8.3f ", matrix[i][j]);
+
         }
-        printf("\n");
+        fprintf(file, "\n");
+
     }
+    fprintf(file, "\n---------------------------------------------------------------\n");
 }
 
-double* print_solution_and_get(double** tableau, double* basics, int rows, int cols) {
-    printf("Solution:\n");
+double* print_solution_and_get(double** tableau, double* basics, int rows, int cols, FILE* file) {
+    fprintf(file, "Solution:\n");
 
     int basics_length = rows - 1;
     double* solution = (double*)calloc(basics_length, sizeof(double));
@@ -29,17 +34,13 @@ double* print_solution_and_get(double** tableau, double* basics, int rows, int c
     for (int i = 0; i < basics_length; i++) {
         int xCol = (int)basics[i];
 
-        if (xCol >= 0 && xCol < cols) {
+        if (xCol != -1) {
             solution[xCol] = tableau[i][cols - 1];
-        }
-        else {
-            continue;
-            //fprintf(stderr, "Warning: Invalid column index basics[%d] = %d\n", i, xCol);
         }
     }
 
     for (int i = 0; i < basics_length; i++) {
-        printf("x%d = %.2f\n", i + 1, solution[i]);
+        fprintf(file, "x%d = %.2f\n", i + 1, solution[i]);
     }
 
     return solution;
@@ -203,7 +204,13 @@ void pivot(double** tableau, int rows, int cols, int pivot_row, int pivot_col) {
     double pivot_value = tableau[pivot_row][pivot_col];
 
     for (int j = 0; j < cols; j++) {
-        tableau[pivot_row][j] /= pivot_value;
+        double value = tableau[pivot_row][j] / pivot_value;
+        if (value == 0) {
+            tableau[pivot_row][j] = 0.0;
+        }
+        else {
+            tableau[pivot_row][j] = value;
+        }
     }
     for (int i = 0; i < rows; i++) {
         if (i != pivot_row) {
@@ -309,7 +316,7 @@ double** add_gomory_cut(double** tableau, int old_rows, int old_cols, int row_to
 
 }
 
-void apply_gomory_cuts(double** tableau, int rows, int cols, double* basics) {
+void apply_gomory_cuts(double** tableau, int rows, int cols, double* basics, FILE* file) {
     int keep_apply_gomory_cut = exist_real_value(tableau, rows, cols);
     int is_first_time = 1;
     int rank;
@@ -317,7 +324,7 @@ void apply_gomory_cuts(double** tableau, int rows, int cols, double* basics) {
     int index = 0;
     
 	if (keep_apply_gomory_cut && rank == MASTER) {
-		printf("\nApply Gomory\n");
+        fprintf(file, "\nApply Gomory\n");
 	}
 	int row_to_cut = -1;
 	while (keep_apply_gomory_cut) {
@@ -325,10 +332,15 @@ void apply_gomory_cuts(double** tableau, int rows, int cols, double* basics) {
 		if (rank == MASTER) {
 			row_to_cut = find_gomory_row_to_cut(tableau, rows, cols);
 			if (row_to_cut == -1) {
-				printf("All solutions are integers.\n");
+                fprintf(file, "All solutions are integers.\n");
 				break;
 			}
-			printf("Adding Gomory cut for row %d\n", row_to_cut);
+            if (row_to_cut == MAX_ITER) {
+                fprintf(file, "\nNot found solution after %d iterations \n", MAX_ITER);
+                fprintf(file, "-------------------------------------------------------------------\n");
+                break;
+            }
+            fprintf(file, "Adding Gomory cut for row %d\n", row_to_cut);
 		}
 
 		MPI_Bcast(&row_to_cut, 1, MPI_INT, MASTER, MPI_COMM_WORLD);
@@ -337,14 +349,14 @@ void apply_gomory_cuts(double** tableau, int rows, int cols, double* basics) {
 		rows++;
 		cols++;
 		if (rank == MASTER) {
-			print_matrix(tableau, rows, cols);
+			print_matrix(tableau, rows, cols, file);
 			int gomory_row = rows - 2;
 			int gomory_col = find_gomory_column_to_add(tableau, rows, cols);
 
 			basics = extend_basics(basics, rows - 2, gomory_col);
 
 			pivot(tableau, rows, cols, gomory_row, gomory_col);
-			double* solution = print_solution_and_get(tableau, basics, rows, cols);
+			double* solution = print_solution_and_get(tableau, basics, rows, cols,file);
 			printf("-------------------------------------------------------------------\n");
 		}
 
@@ -357,21 +369,27 @@ void apply_gomory_cuts(double** tableau, int rows, int cols, double* basics) {
 		index++;
 	}
 	if (rank == MASTER) {
-		print_matrix(tableau, rows, cols);
+		print_matrix(tableau, rows, cols,file);
 		printf("-------------------------------------------------------------------\n");
 	}
         
 }
 
+void init_basic(double* basics, int length) {
+    for (int i = 0; i < length; i++) {
+        basics[i] = -1;
+    }
+}
 
 // Perform Simplex method on the tableau
-int simplex_method(double** tableau, int rows, int cols) {
+int simplex_method(double** tableau, int rows, int cols,FILE* file) {
     double* basics = (double*)malloc((rows - 1) * sizeof(double));
+    init_basic(basics, (rows - 1));
     int rank;
     MPI_Comm comm = MPI_COMM_WORLD;
     MPI_Comm_rank(comm, &rank);
   
-    int basic_was_initialized = 0;
+    
     while (1) {
         // Check for optimality
         int pivot_col = find_pivot_col(tableau, rows, cols);
@@ -380,11 +398,11 @@ int simplex_method(double** tableau, int rows, int cols) {
             double* solution = NULL;
             if (rank == MASTER) {
                 printf("Optimal solution found\n");
-                print_matrix(tableau, rows, cols);
-                solution = print_solution_and_get(tableau, basics, rows, cols);
+                print_matrix(tableau, rows, cols,file);
+                solution = print_solution_and_get(tableau, basics, rows, cols,file);
             }
             MPI_Bcast(basics, (rows - 1), MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
-            apply_gomory_cuts(tableau, rows, cols, basics);
+            apply_gomory_cuts(tableau, rows, cols, basics,file);
             
             return 1;
         }
@@ -411,14 +429,30 @@ int simplex_method(double** tableau, int rows, int cols) {
     }
 }
 
+void clear_file() {
+    FILE* file = fopen(FILE_NAME, "w");
+    if (file != NULL) {
+        fclose(file);
+    }
+    else {
+        fprintf(stderr, "Failed to clear file.\n");
+    }
+}
+
 
 int main(int argc, char* argv[]) {
     int rank, size;
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    double start_time = MPI_Wtime(); // Start timing
-    int rows = 11, cols = 21;
+    FILE* file = fopen(FILE_NAME, "a");
+    if (file == NULL) {
+        fprintf(stderr, "Error opening file.\n");
+        return -1;
+    }
+    double start_time = MPI_Wtime(); 
+    clear_file();
+    int rows = 3, cols = 5;
     double** tableau = NULL;
     double* flat_tableau = NULL;
 
@@ -426,18 +460,10 @@ int main(int argc, char* argv[]) {
 
         
 		tableau = allocate_matrix(rows, cols);
-        double init_tableau[11][21] = {
-            {2, 3, 1, 4, 5, 6, 3, 2, 4, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 35},
-            {3, 1, 4, 2, 1, 5, 4, 3, 2, 6, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 40},
-            {4, 5, 6, 3, 2, 4, 1, 2, 3, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45},
-            {1, 2, 3, 4, 5, 6, 3, 2, 4, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 50},
-            {2, 3, 1, 4, 5, 3, 2, 4, 1, 6, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 55},
-            {6, 4, 5, 1, 3, 2, 4, 5, 6, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 60},
-            {5, 2, 4, 6, 1, 3, 2, 1, 3, 4, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 65},
-            {3, 4, 2, 5, 6, 1, 4, 6, 2, 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 70},
-            {2, 6, 3, 1, 4, 5, 3, 1, 6, 2, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 75},
-            {4, 1, 6, 3, 5, 2, 1, 4, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 80},
-            {-3, -2, -4, -5, -6, -7, -8, -2, -1, -4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        double init_tableau[3][5] = {
+        { -1, 3, 1, 0, 6 },
+        { 7, 1, 0, 1, 35 },
+        {-7 , -9, 0, 0, 0 }
         };
 
         for (int i = 0; i < rows; i++) {
@@ -470,11 +496,12 @@ int main(int argc, char* argv[]) {
     }
 
     if (rank == MASTER) {
-        print_matrix(tableau, rows, cols);
+        fprintf(file, "Initial\n");
+        print_matrix(tableau, rows, cols,file);
     }
 
     // Perform Simplex
-    int optimal = simplex_method(tableau, rows, cols);
+    int optimal = simplex_method(tableau, rows, cols,file);
 
     free_matrix(tableau, rows);
     free(flat_tableau);
@@ -482,7 +509,7 @@ int main(int argc, char* argv[]) {
     double end_time = MPI_Wtime(); // End timing
 
     if (rank == MASTER) {
-        printf("Execution Time: %f seconds\n", end_time - start_time);
+        fprintf(file,"Execution Time: %f seconds\n", end_time - start_time);
     }
 
     MPI_Finalize();
