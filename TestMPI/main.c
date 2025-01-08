@@ -307,10 +307,12 @@ int find_rank_by_global_row_index(int global_row_index, int cols, int* displs) {
 }
 
 void pivot(double* local_matrix, int local_rows, int cols, int pivot_row, int pivot_col, int rank, int* displs) {
-
+    //Начальный индекс строки локальной матрицы по глобальной
     int start_global_row_index = get_global_row(0, cols, rank, displs);
+    //Конечный индекс строки локальной матрицы по глобальной
     int end_global_row_index = get_global_row(local_rows - 1, cols, rank, displs);
     int pivot_local_row = -1;
+    //Локальная свобобная строка
     double* pivoted_row = (double*)malloc(cols * sizeof(double));
 
     if (is_local_matrix_contains_pivot_row(start_global_row_index, end_global_row_index, pivot_row)) {
@@ -499,6 +501,7 @@ void scatter_global_matrix(
         MPI_COMM_WORLD);
 }
 
+
 void apply_gomory_cuts(double* global_matrix, int rows, int cols, double* basics, int rank, int size) {
     int keep_apply_gomory_cut;
     int is_first_time = 1;
@@ -528,6 +531,7 @@ void apply_gomory_cuts(double* global_matrix, int rows, int cols, double* basics
         }
 
         if (rank == MASTER) {
+            //Добавляем дополнительное ограничение Гомори только в основном процессе
             global_matrix = add_gomory_cut(global_matrix, rows, cols, row_to_cut, is_first_time);
         }
 
@@ -549,10 +553,14 @@ void apply_gomory_cuts(double* global_matrix, int rows, int cols, double* basics
         double* tableau_data = NULL;
         double** tableau = NULL;
 
+        //Разделяем основной матрицы между процессами после добавления дополнительного 
+        // ограничения Гомори в основной процессе
         scatter_global_matrix(rank, size, rows, cols, global_matrix, &send_recv_counts, &displs, &local_rows, &local_matrix, &tableau_data, &tableau);
 
+        //Локально применим Pivot
         pivot(local_matrix, local_rows, cols, gomory_row, gomory_col, rank, displs);
 
+        //Собираем результат обратно в основной процесс
         MPI_Gatherv(
             local_matrix,
             send_recv_counts[rank],
@@ -589,12 +597,17 @@ void simplex_method(double* local_matrix, int local_rows, int rows, int cols, in
     int pivot_col = -1;
 
     while (1) {
+        //Находим свободный столбец в последней строке - строка ЦФ, которая находится в последным процессе
         if (is_last_rank(rank, size)) {
             pivot_col = find_global_pivot_col(local_matrix, local_rows, cols);
         }
+        //Так как каждый процесс работает отдельно, то надо отправить 
+        //номер свободного столбца - это уже глобальный
         MPI_Bcast(&pivot_col, 1, MPI_INT, get_last_rank(size), MPI_COMM_WORLD);
         if (pivot_col == -1) {
 
+            //Нашли оптимальное решение с не целочисленными 
+            //Отправляем в основной процесс 
             MPI_Gatherv(
                 local_matrix,
                 send_recv_counts[rank],
@@ -609,6 +622,7 @@ void simplex_method(double* local_matrix, int local_rows, int rows, int cols, in
             write_matrix_ordered(local_matrix, local_rows, cols, rank, size, "Optimal solution");
             write_solution(local_matrix, basics, local_rows, rows, cols, rank, size, displs);
 
+            //Применение метода Гомори
             apply_gomory_cuts(tableau_data, rows, cols, basics, rank, size);
 
             break;
@@ -628,6 +642,7 @@ void simplex_method(double* local_matrix, int local_rows, int rows, int cols, in
             break;
         }
         pivot(local_matrix, local_rows, cols, pivot_row, pivot_col, rank, displs);
+        //Базисное решение
         basics[pivot_row] = pivot_col;
 
     }
@@ -692,6 +707,7 @@ int main(int argc, char* argv[]) {
 
     }
 
+    //Разделение основной матрицы между всеми процессами 
     int base_rows = rows / size;
     int extra_rows = rows % size;
     int offset = 0;
@@ -704,6 +720,7 @@ int main(int argc, char* argv[]) {
 
     int local_rows = send_recv_counts[rank] / cols;
 
+    //Локальная матрица - матрица каждого процесса
     double* local_matrix = (double*)malloc(local_rows * cols * sizeof(double));
 
     MPI_Scatterv(
@@ -717,8 +734,10 @@ int main(int argc, char* argv[]) {
         MASTER,
         MPI_COMM_WORLD);
 
+    //Локально пишем матрицу в файл
     write_matrix_ordered(local_matrix, local_rows, cols, rank, size, "Initial matrix");
 
+    //Локально применим симплекс-метод
     simplex_method(local_matrix, local_rows, rows, cols, rank, size, displs, send_recv_counts, tableau_data, tableau);
 
     if (rank == MASTER) {
