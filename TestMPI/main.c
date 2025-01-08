@@ -12,6 +12,7 @@
 #define ALL_COLS 501
 #define DATA_FILE_NAME "array_data.txt"
 
+
 void print_matrix(double** matrix, int rows, int cols, FILE* file) {
     int i, j;
     for (i = 0; i < rows; i++) {
