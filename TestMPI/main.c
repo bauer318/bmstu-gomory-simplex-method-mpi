@@ -68,37 +68,6 @@ void write_matrix_ordered(double* local_matrix, int rows_per_process, int cols, 
     MPI_File_close(&fh);
 }
 
-
-
-
-void print_matrix(double* matrix, int rows, int cols) {
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            printf("%8.3f ", matrix[i * cols + j]);
-        }
-        printf("\n");
-    }
-    printf("\n---------------------------------------------------------------\n");
-}
-
-void print_matrix_d(double** matrix, int rows, int cols) {
-    int i, j;
-    for (i = 0; i < rows; i++) {
-        for (j = 0; j < cols; j++) {
-            printf("%8.3f ", matrix[i][j]);
-        }
-        printf("\n");
-    }
-    printf("\n---------------------------------------------------------------\n");
-}
-
-double** allocate_matrix(int rows, int cols) {
-    double** matrix = malloc(rows * sizeof(double*));
-    for (int i = 0; i < rows; i++) {
-        matrix[i] = malloc(cols * sizeof(double));
-    }
-    return matrix;
-}
 int get_last_rank(int size) {
     return size - 1;
 }
@@ -140,23 +109,6 @@ double* extend_basics(double* basics, int old_cols, double init_value) {
 void init_basic(double* basics, int length) {
     for (int i = 0; i < length; i++) {
         basics[i] = -1;
-    }
-}
-
-void print_solution(double* local_matrix, double* basics, int local_rows, int rows, int cols, int rank, int size, int* displs) {
-
-    int basics_length = is_last_rank(rank, size) ? local_rows - 1 : local_rows;
-
-    if (basics_length != 0) {
-        printf("Solution from process %d \n", rank);
-    }
-
-    for (int i = 0; i < basics_length; i++) {
-        int global_i = get_global_row(i, cols, rank, displs);
-        int x_col = (int)basics[global_i];
-        if (x_col != -1 && x_col < COLS) {
-            printf("x%d = %8.2f\n", x_col + 1, local_matrix[i * cols + cols - 1]);
-        }
     }
 }
 
