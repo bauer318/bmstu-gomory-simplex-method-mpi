@@ -400,22 +400,28 @@ double* add_gomory_cut(double* tableau, int old_rows, int old_cols, int row_to_c
     int gomory_col = old_cols - 1;
 
     double* result = (double*)malloc(new_rows * new_cols * sizeof(double));
+
+    int i, j;
+    int old_col;
+    double value, fractionalPart;
+    int old_row;
+
     omp_set_num_threads(4);
 
-#pragma omp parallel for collapse(2) shared(result, tableau)
-    for (int i = 0; i < new_rows; i++) {
-        for (int j = 0; j < new_cols; j++) {
-            int old_col = j == old_cols ? j - 1 : j;
+#pragma omp parallel for collapse(2) shared(result, tableau, new_rows, new_cols, old_rows, old_cols, row_to_cut, is_first_time, gomory_row, gomory_col) private(i, j, old_col, value, fractionalPart, old_row)
+    for (i = 0; i < new_rows; i++) { 
+        for (j = 0; j < new_cols; j++) { 
+            old_col = j == old_cols ? j - 1 : j;
+
             // Строка Гомори
             if (i == gomory_row) {
-
                 if (j == gomory_col) {
                     // Пересечения с столбцом Гомори
                     result[i * new_cols + j] = 1;
                 }
                 else {
-                    double value = tableau[row_to_cut * old_cols + old_col];
-                    double fractionalPart = value - floor(value);
+                    value = tableau[row_to_cut * old_cols + old_col];
+                    fractionalPart = value - floor(value);
                     result[i * new_cols + j] = fractionalPart != 0 ? -1 * fractionalPart : fractionalPart;
                 }
             }
@@ -426,7 +432,7 @@ double* add_gomory_cut(double* tableau, int old_rows, int old_cols, int row_to_c
                     result[i * new_cols + j] = 0;
                 }
                 else {
-                    int old_row = i - 1;
+                    old_row = i - 1;
 
                     if (is_first_time) {
                         result[i * new_cols + j] = tableau[old_row * old_cols + old_col] != 0 ? -1 * tableau[old_row * old_cols + old_col] :
@@ -437,12 +443,12 @@ double* add_gomory_cut(double* tableau, int old_rows, int old_cols, int row_to_c
                     }
                 }
             }
+            // Other rows
             else {
                 if (j == gomory_col) {
                     result[i * new_cols + j] = 0;
                 }
                 else {
-
                     result[i * new_cols + j] = tableau[i * old_cols + old_col];
                 }
             }
