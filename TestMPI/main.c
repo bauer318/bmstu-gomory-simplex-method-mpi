@@ -304,13 +304,10 @@ void pivot(double* local_matrix, int local_rows, int cols, int pivot_row, int pi
     }
 }
 
-void pivot_(double* local_matrix, int local_rows, int cols, int pivot_row, int pivot_col, int rank, int* displs, double* target_function_row) {
-    //Начальный индекс строки локальной матрицы по глобальной
+void pivot_using_simplex_method(double* local_matrix, int local_rows, int cols, int pivot_row, int pivot_col, int rank, int* displs, double* target_function_row) {
     int start_global_row_index = get_global_row(0, cols, rank, displs);
-    //Конечный индекс строки локальной матрицы по глобальной
     int end_global_row_index = get_global_row(local_rows - 1, cols, rank, displs);
     int pivot_local_row = -1;
-    //Локальная свобобная строка
     double* pivoted_row = (double*)malloc(cols * sizeof(double));
 
     if (is_local_matrix_contains_pivot_row(start_global_row_index, end_global_row_index, pivot_row)) {
@@ -600,22 +597,12 @@ void simplex_method(double* local_matrix, int local_rows, int rows, int cols, in
     double* basics = (double*)malloc((rows - 1) * sizeof(double));
     init_basic(basics, (rows - 1));
     int pivot_col = -1;
-    //int iter = 81;
 
     while (1) {
-        //Находим свободный столбец в последней строке - строка ЦФ, которая находится в последным процессе
-       /* if (is_last_rank(rank, size)) {
-            pivot_col = find_global_pivot_col(local_matrix, local_rows, cols);
-        }*/
+        //Находим свободный столбец во всех процессах - лучше на одни плюс Broadcast
         pivot_col = find_global_pivot_col(target_function_row, cols);
-       
-        //Так как каждый процесс работает отдельно, то надо отправить 
-        //номер свободного столбца - это уже глобальный
-        //MPI_Bcast(&pivot_col, 1, MPI_INT, get_last_rank(size), MPI_COMM_WORLD);
-        /*pivot_col = target_function_row[ite];
-        ite++;*/
+      
         if (pivot_col == -1) {
-
             //Нашли оптимальное решение с не целочисленными 
             //Отправляем в основной процесс 
             MPI_Gatherv(
@@ -651,7 +638,7 @@ void simplex_method(double* local_matrix, int local_rows, int rows, int cols, in
             write_simple_text("Bounded - not solution\n", rank);
             break;
         }
-        pivot_(local_matrix, local_rows, cols, pivot_row, pivot_col, rank, displs, target_function_row);
+        pivot_using_simplex_method(local_matrix, local_rows, cols, pivot_row, pivot_col, rank, displs, target_function_row);
         //Базисное решение
         basics[pivot_row] = pivot_col;
 
@@ -749,6 +736,7 @@ int main(int argc, char* argv[]) {
         MASTER,
         MPI_COMM_WORLD);
 
+    //Отправляем копию строки ЦФ всем процессам
     MPI_Bcast(target_function_row, cols, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
 
     //Локально пишем матрицу в файл
@@ -763,6 +751,7 @@ int main(int argc, char* argv[]) {
     }
 
     free(local_matrix);
+    free(target_function_row);
 
     double end_time = MPI_Wtime();
     if (rank == MASTER) {
