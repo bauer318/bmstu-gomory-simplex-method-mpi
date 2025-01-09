@@ -288,13 +288,13 @@ void apply_gomory_cuts(double** tableau, int rows, int cols, double* basics, FIL
         print_matrix(tableau, rows, cols, file);
 		
 		keep_apply_gomory_cut = exist_real_value(tableau, rows, cols,basics);
+        if (!keep_apply_gomory_cut) {
+            fprintf(file, "All solutions are integers.\n");
+            double* solution = print_solution_and_get(tableau, basics, rows, cols, file);
+        }
 		is_first_time = 0;
 		index++;
 	}
-    print_matrix(tableau, rows, cols, file);
-    fprintf(file, "-------------------------------------------------------------------\n");
-    double* solution = print_solution_and_get(tableau, basics, rows, cols, file);
-	
         
 }
 
