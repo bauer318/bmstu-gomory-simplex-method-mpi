@@ -187,13 +187,13 @@ int exist_real_value(double* tableau, int rows, int cols, double* basics) {
 }
 
 
-int find_global_pivot_col(double* local_matrix, int local_rows, int cols) {
+int find_global_pivot_col(double* local_matrix, int cols) {
     int pivot_col = -1;
     double most_negative = 0;
 
     for (int j = 0; j < cols - 1; j++) {
-        if (local_matrix[(local_rows - 1) * cols + j] < most_negative) {
-            most_negative = local_matrix[(local_rows - 1) * cols + j];
+        if (local_matrix[j] < most_negative) {
+            most_negative = local_matrix[j];
             pivot_col = j;
         }
     }
@@ -302,8 +302,61 @@ void pivot(double* local_matrix, int local_rows, int cols, int pivot_row, int pi
             }
         }
     }
+}
+
+void pivot_(double* local_matrix, int local_rows, int cols, int pivot_row, int pivot_col, int rank, int* displs, double* target_function_row) {
+    //Начальный индекс строки локальной матрицы по глобальной
+    int start_global_row_index = get_global_row(0, cols, rank, displs);
+    //Конечный индекс строки локальной матрицы по глобальной
+    int end_global_row_index = get_global_row(local_rows - 1, cols, rank, displs);
+    int pivot_local_row = -1;
+    //Локальная свобобная строка
+    double* pivoted_row = (double*)malloc(cols * sizeof(double));
+
+    if (is_local_matrix_contains_pivot_row(start_global_row_index, end_global_row_index, pivot_row)) {
+        pivot_local_row = get_local_row(pivot_row, cols, rank, displs);
+        double pivot_value = local_matrix[pivot_local_row * cols + pivot_col];
+
+        for (int j = 0; j < cols; j++) {
+            double value = local_matrix[pivot_local_row * cols + j] / pivot_value;
+            local_matrix[pivot_local_row * cols + j] = try_to_convert_to_positive_zero(value);
+            pivoted_row[j] = local_matrix[pivot_local_row * cols + j];
+        }
+
+    }
+    int pivoted_row_rank = find_rank_by_global_row_index(pivot_row, cols, displs);
+    MPI_Bcast(&pivot_local_row, 1, MPI_INT, pivoted_row_rank, MPI_COMM_WORLD);
+    MPI_Bcast(pivoted_row, cols, MPI_DOUBLE, pivoted_row_rank, MPI_COMM_WORLD);
+
+    if (!is_local_matrix_contains_pivot_row(start_global_row_index, end_global_row_index, pivot_row)) {
+        for (int i = 0; i < local_rows; i++) {
+            double factor = local_matrix[i * cols + pivot_col];
+            for (int j = 0; j < cols; j++) {
+                local_matrix[i * cols + j] -= factor * pivoted_row[j];
+                local_matrix[i * cols + j] = try_to_convert_to_positive_zero(local_matrix[i * cols + j]);
+            }
+        }
+    }
+    else {
+        for (int i = 0; i < local_rows; i++) {
+            if (i != pivot_local_row) {
+                double factor = local_matrix[i * cols + pivot_col];
+                for (int j = 0; j < cols; j++) {
+                    local_matrix[i * cols + j] -= factor * pivoted_row[j];
+                    local_matrix[i * cols + j] = try_to_convert_to_positive_zero(local_matrix[i * cols + j]);
+                }
+            }
+        }
+    }
+
+    double target_function_row_factor = target_function_row[pivot_col];
+    for (int j = 0; j < cols; j++) {
+        target_function_row[j] -= target_function_row_factor * pivoted_row[j];
+        target_function_row[j] = try_to_convert_to_positive_zero(target_function_row[j]);
+    }
 
 }
+
 
 int find_gomory_row_to_cut(double* tableau, int rows, int cols) {
     int row_to_cut = -1;
@@ -538,24 +591,29 @@ void apply_gomory_cuts(double* global_matrix, int rows, int cols, double* basics
         //Пишем в файл только окончательное решение 
         if (!keep_apply_gomory_cut) {
             write_solution(local_matrix, basics, local_rows, rows, cols, rank, size, displs);
-        }
+        } 
     }
 }
 
 void simplex_method(double* local_matrix, int local_rows, int rows, int cols, int rank, int size, int* displs,
-    int* send_recv_counts, double* tableau_data, double** tableau) {
+    int* send_recv_counts, double* tableau_data, double** tableau, double* target_function_row) {
     double* basics = (double*)malloc((rows - 1) * sizeof(double));
     init_basic(basics, (rows - 1));
     int pivot_col = -1;
+    //int iter = 81;
 
     while (1) {
         //Находим свободный столбец в последней строке - строка ЦФ, которая находится в последным процессе
-        if (is_last_rank(rank, size)) {
+       /* if (is_last_rank(rank, size)) {
             pivot_col = find_global_pivot_col(local_matrix, local_rows, cols);
-        }
+        }*/
+        pivot_col = find_global_pivot_col(target_function_row, cols);
+       
         //Так как каждый процесс работает отдельно, то надо отправить 
         //номер свободного столбца - это уже глобальный
-        MPI_Bcast(&pivot_col, 1, MPI_INT, get_last_rank(size), MPI_COMM_WORLD);
+        //MPI_Bcast(&pivot_col, 1, MPI_INT, get_last_rank(size), MPI_COMM_WORLD);
+        /*pivot_col = target_function_row[ite];
+        ite++;*/
         if (pivot_col == -1) {
 
             //Нашли оптимальное решение с не целочисленными 
@@ -593,7 +651,7 @@ void simplex_method(double* local_matrix, int local_rows, int rows, int cols, in
             write_simple_text("Bounded - not solution\n", rank);
             break;
         }
-        pivot(local_matrix, local_rows, cols, pivot_row, pivot_col, rank, displs);
+        pivot_(local_matrix, local_rows, cols, pivot_row, pivot_col, rank, displs, target_function_row);
         //Базисное решение
         basics[pivot_row] = pivot_col;
 
@@ -621,7 +679,8 @@ int main(int argc, char* argv[]) {
     double* tableau_data = NULL;
     int* send_recv_counts = allocate_array(size);
     int* displs = allocate_array(size);
-
+    double* target_function_row = (double*)malloc(cols * sizeof(double));
+   
     if (size > rows) {
         if (rank == MASTER) {
             write_simple_text("The number of processes must be <= the rows of initial matrix\n", rank);
@@ -655,6 +714,10 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        for (int j = 0; j < cols; j++) {
+            target_function_row[j] = tableau[rows - 1][j];
+        }
+
         fclose(file);
 
     }
@@ -686,11 +749,13 @@ int main(int argc, char* argv[]) {
         MASTER,
         MPI_COMM_WORLD);
 
+    MPI_Bcast(target_function_row, cols, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
+
     //Локально пишем матрицу в файл
     write_matrix_ordered(local_matrix, local_rows, cols, rank, size, "Initial matrix");
 
     //Локально применим симплекс-метод
-    simplex_method(local_matrix, local_rows, rows, cols, rank, size, displs, send_recv_counts, tableau_data, tableau);
+    simplex_method(local_matrix, local_rows, rows, cols, rank, size, displs, send_recv_counts, tableau_data, tableau, target_function_row);
 
     if (rank == MASTER) {
         free(tableau);
