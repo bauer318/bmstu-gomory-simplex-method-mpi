@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include <math.h>
 #include <string.h>
+#include <omp.h>
 
 #define MASTER 0
 #define OUTPUT_FILE_NAME "matrix_output.txt"
@@ -399,15 +400,17 @@ double* add_gomory_cut(double* tableau, int old_rows, int old_cols, int row_to_c
     int gomory_col = old_cols - 1;
 
     double* result = (double*)malloc(new_rows * new_cols * sizeof(double));
+    omp_set_num_threads(4);
 
+#pragma omp parallel for collapse(2) shared(result, tableau)
     for (int i = 0; i < new_rows; i++) {
         for (int j = 0; j < new_cols; j++) {
             int old_col = j == old_cols ? j - 1 : j;
-            //Строка Гомори
+            // Строка Гомори
             if (i == gomory_row) {
 
                 if (j == gomory_col) {
-                    //Пересечения с столбцом Гомори
+                    // Пересечения с столбцом Гомори
                     result[i * new_cols + j] = 1;
                 }
                 else {
@@ -416,10 +419,10 @@ double* add_gomory_cut(double* tableau, int old_rows, int old_cols, int row_to_c
                     result[i * new_cols + j] = fractionalPart != 0 ? -1 * fractionalPart : fractionalPart;
                 }
             }
-            //Последняя строка
+            // Последняя строка
             else if (i == old_rows) {
                 if (j == gomory_col) {
-                    //Пересечения с столбцом Гомори
+                    // Пересечения с столбцом Гомори
                     result[i * new_cols + j] = 0;
                 }
                 else {
@@ -447,7 +450,6 @@ double* add_gomory_cut(double* tableau, int old_rows, int old_cols, int row_to_c
     }
 
     return result;
-
 }
 
 void scatter_global_matrix(
